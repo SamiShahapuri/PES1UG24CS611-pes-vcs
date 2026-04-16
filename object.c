@@ -120,6 +120,12 @@ int object_write(ObjectType type, const void *data, size_t len, ObjectID *id_out
     
     // Step 4: Compute hash (using provided compute_hash)
     compute_hash(full_data, total_len, id_out);
+        // Check if object already exists (deduplication)
+    if (object_exists(id_out)) {
+        free(header);
+        free(full_data);
+        return 0;
+    }
     
     // Step 5: For now, just free and return 0 (no file writing yet)
     free(header);
