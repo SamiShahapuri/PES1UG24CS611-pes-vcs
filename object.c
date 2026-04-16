@@ -248,6 +248,16 @@ int object_read(const ObjectID *id, ObjectType *type_out, void **data_out, size_
     memcpy(*data_out, file_data + header_len, data_len);
     *len_out = data_len;
     
+
+        // Verify hash integrity
+    ObjectID computed;
+    compute_hash(file_data, file_size, &computed);
+    if (memcmp(computed.hash, id->hash, HASH_SIZE) != 0) {
+        free(*data_out);
+        free(file_data);
+        return -1;
+    }
+    
     free(file_data);
     return 0;
 }
