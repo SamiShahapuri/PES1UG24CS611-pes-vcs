@@ -23,6 +23,10 @@
 #include <fcntl.h>
 #include <unistd.h>
 #include <dirent.h>
+#include <sys/stat.h>
+#include <unistd.h>
+#define MODE_FILE 0100644
+#define MODE_EXEC 0100755
 
 // ─── PROVIDED ────────────────────────────────────────────────────────────────
 
@@ -135,10 +139,28 @@ int index_status(const Index *index) {
 //
 // Returns 0 on success, -1 on error.
 int index_load(Index *index) {
-    // TODO: Implement index loading
-    // (See Lab Appendix for logical steps)
-    (void)index;
-    return -1;
+    index->count = 0;
+    FILE *f = fopen(INDEX_FILE, "r");
+    if (!f) return 0; // No index yet, empty
+    
+    char line[1024];
+    while (fgets(line, sizeof(line), f) && index->count < MAX_INDEX_ENTRIES) {
+        uint32_t mode, size;
+        uint64_t mtime;
+        char hash_hex[HASH_HEX_SIZE + 1];
+        char path[512];
+        if (sscanf(line, "%o %64s %lu %u %511s", &mode, hash_hex, &mtime, &size, path) == 5) {
+            IndexEntry *e = &index->entries[index->count];
+            e->mode = mode;
+            hex_to_hash(hash_hex, &e->hash);
+            e->mtime_sec = mtime;
+            e->size = size;
+            strcpy(e->path, path);
+            index->count++;
+        }
+    }
+    fclose(f);
+    return 0;
 }
 
 // Save the index to .pes/index atomically.
