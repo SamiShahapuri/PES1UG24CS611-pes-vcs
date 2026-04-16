@@ -118,16 +118,17 @@ int object_write(ObjectType type, const void *data, size_t len, ObjectID *id_out
     memcpy(full_data, header, header_len);
     memcpy(full_data + header_len, data, len);
     
-    // Step 4: Compute hash (using provided compute_hash)
+    // Step 4: Compute hash
     compute_hash(full_data, total_len, id_out);
-        // Check if object already exists (deduplication)
+    
+    // Deduplication
     if (object_exists(id_out)) {
         free(header);
         free(full_data);
         return 0;
     }
     
-        // Convert hash to hex for file naming
+    // Convert hash to hex for file naming
     char hex[HASH_HEX_SIZE + 1];
     hash_to_hex(id_out, hex);
     
@@ -142,28 +143,45 @@ int object_write(ObjectType type, const void *data, size_t len, ObjectID *id_out
     char temp_path[512];
     snprintf(temp_path, sizeof(temp_path), "%s/tmp_XXXXXX", shard_dir);
     
-    // Step 5: For now, just free and return 0 (still no disk write yet)
-        // Convert hash to hex for file naming
-    char hex[HASH_HEX_SIZE + 1];
-    hash_to_hex(id_out, hex);
+    // Create temporary file
+    int fd = mkstemp(temp_path);
+    if (fd == -1) {
+        free(header);
+        free(full_data);
+        return -1;
+    }
     
-    // Create shard directory: .pes/objects/XX/
-    char shard_dir[512];
-    snprintf(shard_dir, sizeof(shard_dir), "%s/%.2s", OBJECTS_DIR, hex);
-    mkdir(shard_dir, 0755);
+    // Write full object to temp file
+    ssize_t written = write(fd, full_data, total_len);
+    if (written != (ssize_t)total_len) {
+        close(fd);
+        unlink(temp_path);
+        free(header);
+        free(full_data);
+        return -1;
+    }
+    fsync(fd);
+    close(fd);
     
-    // Build final path and temp path
-    char final_path[512];
-    snprintf(final_path, sizeof(final_path), "%s/%s", shard_dir, hex + 2);
-    char temp_path[512];
-    snprintf(temp_path, sizeof(temp_path), "%s/tmp_XXXXXX", shard_dir);
+    // Atomically rename to final path
+    if (rename(temp_path, final_path) != 0) {
+        unlink(temp_path);
+        free(header);
+        free(full_data);
+        return -1;
+    }
     
-    // Step 5: For now, just free and return 0 (still no disk write yet)
+    // fsync the directory to persist the rename
+    int dir_fd = open(shard_dir, O_RDONLY);
+    if (dir_fd != -1) {
+        fsync(dir_fd);
+        close(dir_fd);
+    }
+    
     free(header);
     free(full_data);
     return 0;
-}
-// Read an object from the store.
+}// Read an object from the store.
 //
 // Steps:
 //   1. Build the file path from the hash using object_path()
