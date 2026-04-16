@@ -194,15 +194,31 @@ int head_update(const ObjectID *new_commit) {
 //
 // Returns 0 on success, -1 on error.
 int commit_create(const char *message, ObjectID *commit_id_out) {
-    // 1. Build tree from index
     ObjectID tree_id;
     if (tree_from_index(&tree_id) != 0) return -1;
 
-    // 2. Read parent commit (if any)
     ObjectID parent_id;
     int has_parent = (head_read(&parent_id) == 0);
 
-    // For now, just store dummy hash (will write commit in next step)
+    // 3. Author and timestamp
+    const char *author = pes_author();   // from pes.h
+    uint64_t now = (uint64_t)time(NULL);
+
+    // Fill Commit struct
+    Commit commit;
+    commit.tree = tree_id;
+    if (has_parent)
+        commit.parent = parent_id;
+    else
+        memset(&commit.parent, 0, sizeof(ObjectID));
+    commit.has_parent = has_parent;
+    strncpy(commit.author, author, sizeof(commit.author)-1);
+    commit.author[sizeof(commit.author)-1] = '\0';
+    commit.timestamp = now;
+    strncpy(commit.message, message, sizeof(commit.message)-1);
+    commit.message[sizeof(commit.message)-1] = '\0';
+
+    // For now, still dummy output (serialization & write in next commit)
     memset(commit_id_out->hash, 0, HASH_SIZE);
     return 0;
 }
