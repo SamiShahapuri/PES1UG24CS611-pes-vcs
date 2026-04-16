@@ -143,6 +143,22 @@ int object_write(ObjectType type, const void *data, size_t len, ObjectID *id_out
     snprintf(temp_path, sizeof(temp_path), "%s/tmp_XXXXXX", shard_dir);
     
     // Step 5: For now, just free and return 0 (still no disk write yet)
+        // Convert hash to hex for file naming
+    char hex[HASH_HEX_SIZE + 1];
+    hash_to_hex(id_out, hex);
+    
+    // Create shard directory: .pes/objects/XX/
+    char shard_dir[512];
+    snprintf(shard_dir, sizeof(shard_dir), "%s/%.2s", OBJECTS_DIR, hex);
+    mkdir(shard_dir, 0755);
+    
+    // Build final path and temp path
+    char final_path[512];
+    snprintf(final_path, sizeof(final_path), "%s/%s", shard_dir, hex + 2);
+    char temp_path[512];
+    snprintf(temp_path, sizeof(temp_path), "%s/tmp_XXXXXX", shard_dir);
+    
+    // Step 5: For now, just free and return 0 (still no disk write yet)
     free(header);
     free(full_data);
     return 0;
