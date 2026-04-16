@@ -133,6 +133,79 @@ int tree_serialize(const Tree *tree, void **data_out, size_t *len_out) {
 
 // ---------- Recursive tree builder ----------
 
+
+static int build_tree_for_dir(const char *dir_prefix, const IndexEntry *entries, int count, ObjectID *out_hash) {
+    Tree tree = { .count = 0 };
+    char *subdirs[1024];
+    int subdir_count = 0;
+    
+    // Collect unique subdirectories
+    for (int i = 0; i < count; i++) {
+        const char *rel = entries[i].path + strlen(dir_prefix);
+        if (*rel == '/') rel++;
+        const char *slash = strchr(rel, '/');
+        if (slash) {
+            char subdir[256];
+            size_t len = slash - rel;
+            strncpy(subdir, rel, len);
+            subdir[len] = '\0';
+            int found = 0;
+            for (int j = 0; j < subdir_count; j++) {
+                if (strcmp(subdirs[j], subdir) == 0) { found = 1; break; }
+            }
+            if (!found) {
+                subdirs[subdir_count] = strdup(subdir);
+                subdir_count++;
+            }
+        }
+    }
+    
+    // Recursively build subtrees
+    for (int s = 0; s < subdir_count; s++) {
+        char new_prefix[512];
+        snprintf(new_prefix, sizeof(new_prefix), "%s/%s", dir_prefix, subdirs[s]);
+        IndexEntry sub_entries[1024];
+        int sub_count = 0;
+        for (int i = 0; i < count; i++) {
+            if (strncmp(entries[i].path, new_prefix, strlen(new_prefix)) == 0) {
+                sub_entries[sub_count++] = entries[i];
+            }
+        }
+        ObjectID sub_hash;
+        if (build_tree_for_dir(new_prefix, sub_entries, sub_count, &sub_hash) != 0) {
+            for (int j = 0; j < subdir_count; j++) free(subdirs[j]);
+            return -1;
+        }
+        TreeEntry *e = &tree.entries[tree.count++];
+        e->mode = MODE_DIR;
+        memcpy(&e->hash, &sub_hash, sizeof(ObjectID));
+        strncpy(e->name, subdirs[s], sizeof(e->name)-1);
+        e->name[sizeof(e->name)-1] = '\0';
+        free(subdirs[s]);
+    }
+    
+    // Add file entries (no slash)
+    for (int i = 0; i < count; i++) {
+        const char *rel = entries[i].path + strlen(dir_prefix);
+        if (*rel == '/') rel++;
+        if (strchr(rel, '/') == NULL) {
+            TreeEntry *e = &tree.entries[tree.count++];
+            e->mode = entries[i].mode;
+            memcpy(&e->hash, &entries[i].hash, sizeof(ObjectID));
+            strncpy(e->name, rel, sizeof(e->name)-1);
+            e->name[sizeof(e->name)-1] = '\0';
+        }
+    }
+    
+    // Serialize and write this tree object
+    void *data;
+    size_t len;
+    if (tree_serialize(&tree, &data, &len) != 0) return -1;
+    int ret = object_write(OBJ_TREE, data, len, out_hash);
+    free(data);
+    return ret;
+}
+
 static int build_tree_for_dir(const char *dir_prefix, const IndexEntry *entries, int count, ObjectID *out_hash) {
     Tree tree = { .count = 0 };
     char *subdirs[1024];
@@ -185,7 +258,8 @@ static int build_tree_for_dir(const char *dir_prefix, const IndexEntry *entries,
         free(subdirs[s]);
     }
     
-    // Still missing file entries – will add in next commit
+    
+
     return -1;
 }
 int tree_from_index(ObjectID *id_out) {
