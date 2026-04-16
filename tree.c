@@ -15,6 +15,7 @@
 #include <string.h>
 #include <dirent.h>
 #include <sys/stat.h>
+#include "index.h"
 
 // ─── Mode Constants ─────────────────────────────────────────────────────────
 
@@ -129,14 +130,42 @@ int tree_serialize(const Tree *tree, void **data_out, size_t *len_out) {
 //   - object_write    : save that binary buffer to the store as OBJ_TREE
 //
 // Returns 0 on success, -1 on error.
+
+// ---------- Recursive tree builder ----------
+static int build_tree_for_dir(const char *dir_prefix, const IndexEntry *entries, int count, ObjectID *out_hash) {
+    Tree tree = { .count = 0 };
+    // Collect unique subdirectories
+    char *subdirs[1024];
+    int subdir_count = 0;
+    
+    for (int i = 0; i < count; i++) {
+        const char *rel = entries[i].path + strlen(dir_prefix);
+        if (*rel == '/') rel++;
+        const char *slash = strchr(rel, '/');
+        if (slash) {
+            char subdir[256];
+            size_t len = slash - rel;
+            strncpy(subdir, rel, len);
+            subdir[len] = '\0';
+            int found = 0;
+            for (int j = 0; j < subdir_count; j++) {
+                if (strcmp(subdirs[j], subdir) == 0) { found = 1; break; }
+            }
+            if (!found) {
+                subdirs[subdir_count] = strdup(subdir);
+                subdir_count++;
+            }
+        }
+    }
+    
+    // For now, free and return error (next commit will build subtrees)
+    for (int j = 0; j < subdir_count; j++) free(subdirs[j]);
+    return -1;
+}
+
 int tree_from_index(ObjectID *id_out) {
-    Index idx;
-    if (index_load(&idx) != 0) return -1;
-    
-    // TODO: build tree from idx.entries
-    
-    // Temporary: just free and return error
-    // (We'll implement properly in next commits)
-    free(idx.entries);  // index_load allocates entries
+    // TODO: Implement recursive tree building
+    // (See Lab Appendix for logical steps)
+    (void)id_out;
     return -1;
 }
