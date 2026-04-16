@@ -200,11 +200,9 @@ int commit_create(const char *message, ObjectID *commit_id_out) {
     ObjectID parent_id;
     int has_parent = (head_read(&parent_id) == 0);
 
-    // 3. Author and timestamp
-    const char *author = pes_author();   // from pes.h
+    const char *author = pes_author();
     uint64_t now = (uint64_t)time(NULL);
 
-    // Fill Commit struct
     Commit commit;
     commit.tree = tree_id;
     if (has_parent)
@@ -218,7 +216,17 @@ int commit_create(const char *message, ObjectID *commit_id_out) {
     strncpy(commit.message, message, sizeof(commit.message)-1);
     commit.message[sizeof(commit.message)-1] = '\0';
 
-    // For now, still dummy output (serialization & write in next commit)
-    memset(commit_id_out->hash, 0, HASH_SIZE);
+    // Serialize the commit
+    void *data;
+    size_t len;
+    if (commit_serialize(&commit, &data, &len) != 0) return -1;
+
+    // Write as commit object
+    if (object_write(OBJ_COMMIT, data, len, commit_id_out) != 0) {
+        free(data);
+        return -1;
+    }
+    free(data);
+
     return 0;
 }
