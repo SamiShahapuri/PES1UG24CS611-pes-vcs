@@ -7,7 +7,7 @@
 #include <fcntl.h>
 #include <unistd.h>
 #include <dirent.h>
-#include <time.h>          // for time_t
+#include <time.h>
 
 #define MODE_FILE 0100644
 #define MODE_EXEC 0100755
@@ -15,9 +15,13 @@
 // Forward declaration for object_write (from object.c)
 int object_write(ObjectType type, const void *data, size_t len, ObjectID *id_out);
 
+// Comparator for sorting index entries by path
+static int compare_index_entries(const void *a, const void *b) {
+    return strcmp(((const IndexEntry *)a)->path, ((const IndexEntry *)b)->path);
+}
+
 // ─── PROVIDED ────────────────────────────────────────────────────────────────
 
-// Find an index entry by path (linear scan).
 IndexEntry* index_find(Index *index, const char *path) {
     for (int i = 0; i < index->count; i++) {
         if (strcmp(index->entries[i].path, path) == 0)
@@ -26,7 +30,6 @@ IndexEntry* index_find(Index *index, const char *path) {
     return NULL;
 }
 
-// Remove a file from the index.
 int index_remove(Index *index, const char *path) {
     int idx = -1;
     for (int i = 0; i < index->count; i++) {
@@ -43,7 +46,6 @@ int index_remove(Index *index, const char *path) {
     return 0;
 }
 
-// Print the status of the working directory.
 int index_status(const Index *index) {
     printf("Staged changes:\n");
     int staged_count = 0;
@@ -106,7 +108,7 @@ int index_status(const Index *index) {
     return 0;
 }
 
-// ─── Implemented functions ──────────────────────────────────────────────────
+// ─── IMPLEMENTED FUNCTIONS ──────────────────────────────────────────────────
 
 int index_load(Index *index) {
     index->count = 0;
@@ -134,13 +136,22 @@ int index_load(Index *index) {
 }
 
 int index_save(const Index *index) {
+    // Create a sorted copy of entries (required for deterministic output)
+    IndexEntry *sorted = malloc(index->count * sizeof(IndexEntry));
+    if (!sorted && index->count > 0) return -1;
+    memcpy(sorted, index->entries, index->count * sizeof(IndexEntry));
+    qsort(sorted, index->count, sizeof(IndexEntry), compare_index_entries);
+
     char temp_path[512];
     snprintf(temp_path, sizeof(temp_path), "%s.tmp", INDEX_FILE);
     FILE *f = fopen(temp_path, "w");
-    if (!f) return -1;
+    if (!f) {
+        free(sorted);
+        return -1;
+    }
 
     for (int i = 0; i < index->count; i++) {
-        const IndexEntry *e = &index->entries[i];
+        const IndexEntry *e = &sorted[i];
         char hex[HASH_HEX_SIZE + 1];
         hash_to_hex(&e->hash, hex);
         fprintf(f, "%o %s %lu %u %s\n", e->mode, hex, e->mtime_sec, e->size, e->path);
@@ -148,6 +159,7 @@ int index_save(const Index *index) {
     fflush(f);
     fsync(fileno(f));
     fclose(f);
+    free(sorted);
 
     if (rename(temp_path, INDEX_FILE) != 0) {
         unlink(temp_path);
@@ -157,15 +169,19 @@ int index_save(const Index *index) {
 }
 
 int index_add(Index *index, const char *path) {
+    // Read file content
     FILE *f = fopen(path, "rb");
     if (!f) return -1;
     fseek(f, 0, SEEK_END);
     long size = ftell(f);
     fseek(f, 0, SEEK_SET);
     char *data = malloc(size);
-    fread(data, 1, size, f);
+    if (!data) { fclose(f); return -1; }
+    size_t nread = fread(data, 1, size, f);
     fclose(f);
+    if (nread != (size_t)size) { free(data); return -1; }
 
+    // Write as blob
     ObjectID id;
     if (object_write(OBJ_BLOB, data, size, &id) != 0) {
         free(data);
@@ -173,11 +189,13 @@ int index_add(Index *index, const char *path) {
     }
     free(data);
 
+    // Get file metadata
     struct stat st;
-    stat(path, &st);
+    if (stat(path, &st) != 0) return -1;
     uint32_t mode = MODE_FILE;
     if (st.st_mode & S_IXUSR) mode = MODE_EXEC;
 
+    // Update or add entry
     IndexEntry *entry = index_find(index, path);
     if (entry) {
         entry->mode = mode;
@@ -194,5 +212,8 @@ int index_add(Index *index, const char *path) {
     } else {
         return -1;
     }
+
+    // Persist the index
+    if (index_save(index) != 0) return -1;
     return 0;
 }
