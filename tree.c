@@ -17,6 +17,8 @@
 #include <sys/stat.h>
 #include "index.h"
 
+int object_write(ObjectType type, const void *data, size_t len, ObjectID *id_out);  
+
 // ─── Mode Constants ─────────────────────────────────────────────────────────
 
 #define MODE_FILE      0100644
@@ -220,7 +222,6 @@ int tree_from_index(ObjectID *id_out) {
         free(data);
         return ret;
     }
-    
     // Build tree from root ("")
     return build_tree_for_dir("", idx.entries, idx.count, id_out);
 }
