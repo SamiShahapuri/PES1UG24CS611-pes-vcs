@@ -204,11 +204,9 @@ int object_write(ObjectType type, const void *data, size_t len, ObjectID *id_out
 // The caller is responsible for calling free(*data_out).
 // Returns 0 on success, -1 on error (file not found, corrupt, etc.).
 int object_read(const ObjectID *id, ObjectType *type_out, void **data_out, size_t *len_out) {
-    // Step 1: Build file path
     char path[512];
     object_path(id, path, sizeof(path));
     
-    // Step 2: Open and read the entire file
     FILE *f = fopen(path, "rb");
     if (!f) return -1;
     
@@ -221,7 +219,35 @@ int object_read(const ObjectID *id, ObjectType *type_out, void **data_out, size_
     fread(file_data, 1, file_size, f);
     fclose(f);
     
-    // For now, just free and return error (we'll add parsing next)
+    // Find the null byte separating header and data
+    unsigned char *null_pos = memchr(file_data, '\0', file_size);
+    if (!null_pos) { free(file_data); return -1; }
+    size_t header_len = null_pos - file_data + 1;
+    size_t data_len = file_size - header_len;
+    
+    // Parse header: "type size"
+    char type_str[16], size_str[32];
+    if (sscanf((char*)file_data, "%15s %31s", type_str, size_str) != 2) {
+        free(file_data);
+        return -1;
+    }
+    
+    // Determine ObjectType
+    if (strcmp(type_str, "blob") == 0) *type_out = OBJ_BLOB;
+    else if (strcmp(type_str, "tree") == 0) *type_out = OBJ_TREE;
+    else if (strcmp(type_str, "commit") == 0) *type_out = OBJ_COMMIT;
+    else { free(file_data); return -1; }
+    
+    // Verify size matches
+    size_t parsed_len = strtoul(size_str, NULL, 10);
+    if (parsed_len != data_len) { free(file_data); return -1; }
+    
+    // Allocate and copy data portion
+    *data_out = malloc(data_len);
+    if (!*data_out) { free(file_data); return -1; }
+    memcpy(*data_out, file_data + header_len, data_len);
+    *len_out = data_len;
+    
     free(file_data);
-    return -1;
+    return 0;
 }
