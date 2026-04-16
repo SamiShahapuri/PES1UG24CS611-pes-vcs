@@ -132,12 +132,13 @@ int tree_serialize(const Tree *tree, void **data_out, size_t *len_out) {
 // Returns 0 on success, -1 on error.
 
 // ---------- Recursive tree builder ----------
+
 static int build_tree_for_dir(const char *dir_prefix, const IndexEntry *entries, int count, ObjectID *out_hash) {
     Tree tree = { .count = 0 };
-    // Collect unique subdirectories
     char *subdirs[1024];
     int subdir_count = 0;
     
+    // Collect unique subdirectories
     for (int i = 0; i < count; i++) {
         const char *rel = entries[i].path + strlen(dir_prefix);
         if (*rel == '/') rel++;
@@ -158,11 +159,35 @@ static int build_tree_for_dir(const char *dir_prefix, const IndexEntry *entries,
         }
     }
     
-    // For now, free and return error (next commit will build subtrees)
-    for (int j = 0; j < subdir_count; j++) free(subdirs[j]);
+    // Recursively build each subdirectory
+    for (int s = 0; s < subdir_count; s++) {
+        char new_prefix[512];
+        snprintf(new_prefix, sizeof(new_prefix), "%s/%s", dir_prefix, subdirs[s]);
+        // Collect entries under this subdir
+        IndexEntry sub_entries[1024];
+        int sub_count = 0;
+        for (int i = 0; i < count; i++) {
+            if (strncmp(entries[i].path, new_prefix, strlen(new_prefix)) == 0) {
+                sub_entries[sub_count++] = entries[i];
+            }
+        }
+        ObjectID sub_hash;
+        if (build_tree_for_dir(new_prefix, sub_entries, sub_count, &sub_hash) != 0) {
+            for (int j = 0; j < subdir_count; j++) free(subdirs[j]);
+            return -1;
+        }
+        // Add subtree entry to current tree
+        TreeEntry *e = &tree.entries[tree.count++];
+        e->mode = MODE_DIR;
+        memcpy(&e->hash, &sub_hash, sizeof(ObjectID));
+        strncpy(e->name, subdirs[s], sizeof(e->name)-1);
+        e->name[sizeof(e->name)-1] = '\0';
+        free(subdirs[s]);
+    }
+    
+    // Still missing file entries – will add in next commit
     return -1;
 }
-
 int tree_from_index(ObjectID *id_out) {
     // TODO: Implement recursive tree building
     // (See Lab Appendix for logical steps)
